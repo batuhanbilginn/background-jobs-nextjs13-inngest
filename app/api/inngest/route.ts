@@ -5,9 +5,7 @@ import { Idea } from "@/types/collections"
 import { OpenAIStream } from "@/lib/openai"
 import { supabase } from "@/lib/utils"
 
-export const config = {
-  runtime: "edge",
-}
+export const runtime = "edge"
 
 // Create a client to send and receive events
 export const inngest = new Inngest({ name: "Blog Post Generator" })
