@@ -6,18 +6,16 @@ import { OpenAIStream } from "@/lib/openai"
 import { supabase } from "@/lib/utils"
 
 // It needs to be like this: export const runtime="edge"
-export const config = {
-  runtime: "edge",
-}
+export const runtime = "edge"
 
 // Create a client to send and receive events
-export const inngest = new Inngest({
+const inngest = new Inngest({
   name: "Blog Post Generator",
   eventKey: process.env.INNGEST_EVENT_KEY!,
 })
 
 // Schedule a job to run on specific dates
-export const sendIdeasToGenerator = inngest.createFunction(
+const sendIdeasToGenerator = inngest.createFunction(
   {
     name: "Send Ideas to Generator",
   },
@@ -56,7 +54,7 @@ export const sendIdeasToGenerator = inngest.createFunction(
 )
 
 // Generate Blog Post
-export const generateBlogPost = inngest.createFunction(
+const generateBlogPost = inngest.createFunction(
   { name: "Generate Blog Post" },
   { event: "app/generate.blog.post" },
   async ({ step, event }) => {

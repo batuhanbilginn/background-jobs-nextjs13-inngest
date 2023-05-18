@@ -1,6 +1,7 @@
 import Image from "next/image"
 import { notFound } from "next/navigation"
 
+import { PostWithCategory } from "@/types/collections"
 import { supabase } from "@/lib/utils"
 import PostBody from "@/components/post/post-body"
 
@@ -24,7 +25,7 @@ const Page = async ({
     .from("posts")
     .select("*, category:categories(*)")
     .eq("id", id)
-    .single()
+    .returns<PostWithCategory>()
 
   if (!post) notFound()
 
@@ -32,14 +33,14 @@ const Page = async ({
     <section className="container pt-6 pb-8 md:py-10">
       <div className="flex flex-col items-start gap-2">
         <div className="px-2 py-1 text-xs rounded-md bg-slate-200 dark:bg-slate-100 dark:text-slate-900">
-          {post.category.title}
+          {post?.category?.title}
         </div>
         <h1 className="text-2xl font-extrabold leading-tight tracking-tighter sm:text-2xl md:text-4xl lg:text-5xl">
           {post.title}
         </h1>
         <Image
-          src={post.image}
-          alt={post.title}
+          src={post?.image ?? ""}
+          alt={post?.title ?? ""}
           width={1920}
           height={1080}
           priority
@@ -47,7 +48,7 @@ const Page = async ({
         />
       </div>
       <article className="mt-8">
-        <PostBody body={post.body} />
+        <PostBody body={post.body!!} />
       </article>
     </section>
   )
