@@ -5,10 +5,16 @@ import { Idea } from "@/types/collections"
 import { OpenAIStream } from "@/lib/openai"
 import { supabase } from "@/lib/utils"
 
-export const runtime = "edge"
+// It needs to be like this: export const runtime="edge"
+export const config = {
+  runtime: "edge",
+}
 
 // Create a client to send and receive events
-export const inngest = new Inngest({ name: "Blog Post Generator" })
+export const inngest = new Inngest({
+  name: "Blog Post Generator",
+  eventKey: process.env.INNGEST_EVENT_KEY!,
+})
 
 // Schedule a job to run on specific dates
 export const sendIdeasToGenerator = inngest.createFunction(
@@ -17,31 +23,35 @@ export const sendIdeasToGenerator = inngest.createFunction(
   },
   {
     // Run on schedule
-    cron: "25 16 * * *",
+    cron: "42 15 * * *",
   },
   async ({ step }) => {
     // Get Ideas From Database
-    const { data: ideas } = await supabase
-      .from("ideas")
-      .select("*")
-      .eq("status", "waiting")
-      .limit(3)
-      .returns<Idea[]>()
+    const events = await step.run("get ideas from database", async () => {
+      const { data: ideas } = await supabase
+        .from("ideas")
+        .select("*")
+        .eq("status", "waiting")
+        .limit(3)
+        .returns<Idea[]>()
 
-    if (!ideas) {
-      return
-    }
+      if (!ideas) {
+        return []
+      }
 
-    const events = ideas.map((idea) => ({
-      name: "app/generate.blog.post",
-      data: {
-        idea: idea.idea,
-        category: idea.category,
-        id: idea.id,
-      },
-    }))
+      const events = ideas.map((idea) => ({
+        name: "app/generate.blog.post",
+        data: {
+          idea: idea.idea,
+          category: idea.category,
+          id: idea.id,
+        },
+      }))
 
-    step.sendEvent(events)
+      return events
+    })
+
+    await step.sendEvent(events)
   }
 )
 
@@ -103,14 +113,14 @@ export const generateBlogPost = inngest.createFunction(
             content:
               "Outline:I. Introduction\n- Brief history of Apple Inc.\n- Importance of knowing Apple's most selling product\n\nII. Apple's Product Line\n- Overview of Apple's product line\n- Explanation of each product\n\nIII. Factors Affecting Sales\n- Market demand\n- Competition\n- Product innovation\n- Marketing strategy\n\nIV. Apple's Most Selling Product\n- Analysis of sales figures\n- Comparison with other products\n- Factors contributing to its success\n\nV. Conclusion\n- Recap of Apple's product line\n- Importance of understanding the most selling product\n- Final thoughts and recommendations.",
           },
-          { role: "assistant", content: "Best Selling Apple Products" },
+          { role: "assistant", content: "best-selling-apple-products" },
           {
             role: "user",
             content: `Outline: ${outline}`,
           },
         ],
-        max_tokens: 1000,
-        temperature: 0.55,
+        max_tokens: 500,
+        temperature: 0.4,
         stream: true,
       })
       const reader = stream.getReader()
@@ -144,7 +154,7 @@ export const generateBlogPost = inngest.createFunction(
             content: `Generate a blog post for this outline: ${outline}`,
           },
         ],
-        max_tokens: 2000,
+        max_tokens: 3000,
         temperature: 0.75,
         stream: true,
       })
@@ -172,7 +182,9 @@ export const generateBlogPost = inngest.createFunction(
     // Step-3 Get Hero Image from Unsplash
     const heroImage = await step.run("get hero image", async () => {
       const response = await fetch(
-        `https://api.unsplash.com/search/photos?query=${keyword}&client_id=${process.env.UNSPLASH_ACCESS_KEY}`
+        `https://api.unsplash.com/search/photos?query=${keyword.toLocaleLowerCase()}&client_id=${
+          process.env.UNSPLASH_ACCESS_KEY
+        }`
       )
       const { results } = await response.json()
       return results?.[0]?.urls?.regular ?? ""
@@ -180,12 +192,18 @@ export const generateBlogPost = inngest.createFunction(
 
     // Step-4A Save Post and Update Idea Status
     const savePost = step.run("save post", async () => {
-      await supabase.from("posts").insert({
-        title: idea,
-        body: blogPost,
-        image: heroImage,
-        category,
-      })
+      const { data: savedPost } = await supabase
+        .from("posts")
+        .insert({
+          title: idea,
+          body: blogPost,
+          image: heroImage,
+          category,
+        })
+        .select("id")
+        .single()
+
+      return savedPost
     })
 
     // Step-4B Update Idea Status
@@ -194,7 +212,38 @@ export const generateBlogPost = inngest.createFunction(
     })
 
     // Step-4 Results
-    await Promise.all([savePost, updateIdeaStatus])
+    const [savedPost] = await Promise.all([savePost, updateIdeaStatus])
+
+    // Step-5 Revalidate Pages
+    await Promise.all([
+      step.run("revalidate posts", async () => {
+        await fetch(`http://localhost:3000/api/revalidate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ path: "/posts" }),
+        })
+      }),
+      step.run("revalidate post", async () => {
+        await fetch(`http://localhost:3000/api/revalidate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ path: `/posts/${savedPost?.id}` }),
+        })
+      }),
+      step.run("revalidate home", async () => {
+        await fetch(`http://localhost:3000/api/revalidate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ path: "/" }),
+        })
+      }),
+    ])
   }
 )
 
@@ -204,5 +253,6 @@ export const { GET, POST, PUT } = serve(
   [sendIdeasToGenerator, generateBlogPost],
   {
     streaming: "allow",
+    signingKey: process.env.INNGEST_SIGNING_KEY!,
   }
 )

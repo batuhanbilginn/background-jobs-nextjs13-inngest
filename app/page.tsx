@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache"
+import { Inngest } from "inngest"
 
 import { IdeaWithCategory } from "@/types/collections"
 import { supabase } from "@/lib/utils"
@@ -13,9 +14,33 @@ export default async function IndexPage() {
 
   const addNewIdea = async (data: FormData) => {
     "use server"
-    await supabase
+    // Generate the idea
+    const { data: generatedIdea } = await supabase
       .from("ideas")
-      .insert({ category: data.get("category"), idea: data.get("idea") })
+      .insert({
+        category: data.get("category") as unknown as number,
+        idea: data.get("idea") as string,
+      })
+      .select("*")
+      .single()
+
+    if (!generatedIdea) throw new Error("Failed to generate idea")
+
+    const inngest = new Inngest({
+      name: "Blog Post Generator",
+      eventKey: process.env.INNGEST_EVENT_KEY!,
+    })
+
+    // Send an event to Inngest
+    await inngest.send({
+      name: "app/generate.blog.post",
+      data: {
+        idea: generatedIdea.idea,
+        category: generatedIdea.category,
+        id: generatedIdea.id,
+      },
+    })
+    // Revalidate the page
     revalidatePath("/")
   }
 
